@@ -66,6 +66,12 @@ public static unsafe class RootSig
 
     /// <summary>The engine's rule is confirmed by a real game (<see cref="ConfirmedEngines"/>, per version and fork). Another
     /// fork (e.g. Stellar Blade's) may add slots no shader shows, so it stays unconfirmed.</summary>
+    /// <summary>The driver's ray tracing cache never serves the game what a warm compiled, so no ray tracing is planned or replayed for it. Kuro's
+    /// 4.26 fork (Wuthering Waves, NVIDIA, measured 2026-10): 1,137 collections the game had created, compiled again by a warm
+    /// under its exe name with its NVAPI state, the driver profile's folder condition and OMM options all tried, every one
+    /// compiled again in game (median 94 ms) while the game's own entries hit (12 ms). The raster cache hits as usual.</summary>
+    public static bool NoRtCache(Rule r) => r == Rule.Kuro;
+
     public static bool Verified(EngineInfo e) => RuleFor(e) is { } r && (r == Rule.Red3 || ConfirmedEngines.Current.Contains(e)); // one REDengine 3 build: its recording confirmed it
 
     /// <summary>UE's six static samplers (space 1000, s0-s5): point/bilinear/trilinear x wrap/clamp, 52 bytes each.</summary>

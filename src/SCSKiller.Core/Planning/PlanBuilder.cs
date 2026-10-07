@@ -17,6 +17,7 @@ sealed class PlanBuilder
     readonly IProgress<string>? log;
     readonly CancellationToken ct;
     readonly bool maximum;
+    readonly bool compact; // raster and compute from the game's own lists only (IPlanner.Build); recorded PSOs replay anyway
     readonly MiddlewarePacks? packs, sharedPacks;
 
     readonly IReadOnlyDictionary<string, ShaderInfo> bc;
@@ -67,10 +68,11 @@ sealed class PlanBuilder
     /// <param name="maximum">with a per-stage cache: also every stage set whose units the cover already has, on its first
     /// resolved state (every pre-linked pair, as a whole-pipeline plan has them); the units stay the same</param>
     public PlanBuilder(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir,
-        IProgress<string>? log, CancellationToken ct, bool maximum = false, MiddlewarePacks? packs = null, MiddlewarePacks? sharedPacks = null)
+        IProgress<string>? log, CancellationToken ct, bool maximum = false, MiddlewarePacks? packs = null, MiddlewarePacks? sharedPacks = null,
+        bool compact = false)
     {
-        (this.game, this.engine, this.index, this.recording, this.caps, this.outDir, this.log, this.ct, this.maximum, this.packs, this.sharedPacks) =
-            (game, engine, index, recording, caps, outDir, log, ct, maximum, packs, sharedPacks);
+        (this.game, this.engine, this.index, this.recording, this.caps, this.outDir, this.log, this.ct, this.maximum, this.packs, this.sharedPacks, this.compact) =
+            (game, engine, index, recording, caps, outDir, log, ct, maximum, packs, sharedPacks, compact);
         bc = index.Shaders;
         maps = index.Maps.Select(m => (m.Platform, Pooled: false, Shas: m.Shaders, m.IsPipeline)).ToList();
         maps.AddRange(index.Maps.Where(m => m.Library == "Global").GroupBy(m => m.Platform)
@@ -85,9 +87,12 @@ sealed class PlanBuilder
         ReadRecording();
         Decide();
         if (dx12) RuntimeBuilt();
+        if (compact) log?.Report("compact: raster and compute pipelines from the game's own lists (its pipeline cache, its global shaders, the recording); the material shaders of its maps aren't enumerated");
         if (dx12 && UnitPolicy.For(caps) is { } policy) PerStage(policy);
         else StageSets(Emit);
-        if (dx12 && Planner.RtCollectionCache(caps))
+        if (dx12 && RootSig.NoRtCache(this.rule))
+            log?.Report("ray tracing: the driver's ray tracing cache never serves this game what a compile made (measured, RootSig.NoRtCache): no collections planned, no recorded state objects replayed");
+        else if (dx12 && Planner.RtCollectionCache(caps))
             try { RtPlan(); }
             catch (RootSig.SerializeException e)   // the rule's global root signature: no collections, the PSOs still plan
             {
@@ -557,7 +562,7 @@ sealed class PlanBuilder
         foreach (var (mapPlat, pooled, shas, isPipeline) in maps)
         {
             ct.ThrowIfCancellationRequested();
-            if (!OnPlatform(mapPlat)) continue;
+            if (!OnPlatform(mapPlat) || compact && !isPipeline && !pooled) continue; // compact: shipped pipelines and the pooled global shaders
             var all = shas.Where(bc.ContainsKey).ToList();
             var ds = all.Where(Usable).Select(h => bc[h]).ToList();
             if (isPipeline && ds.Count < all.Count) continue; // a shipped pipeline stays whole or not at all
@@ -1009,7 +1014,7 @@ sealed class PlanBuilder
         var rtLibSet = dx12 ? maps.Where(m => m.Platform == plat).SelectMany(m => m.Shas).Where(h => bc.TryGetValue(h, out var s) && s.Stage == Stage.Library && s.ShaderModel != "lib_6_8").ToHashSet() : [];
         var rtLibs = rtLibSet.Count;
         // what the plan compiles of them: the libraries of its synthesized collections and of the recorded state objects that replay
-        var replayable = ReplayableStateObjects();
+        var replayable = RootSig.NoRtCache(rule) ? [] : ReplayableStateObjects();
         var rtCovered = rtItems.Select(i => RtCollections.ParseItem(i).Library)
             .Concat(hitGroupItems.Select(RedEngine.RedRayTracing.ParseItem).SelectMany(h => new[] { h.ClosestHit, h.AnyHit }).OfType<string>())
             .Concat(replayable.SelectMany(r => ParseStateObject(r).Libraries)).Count(rtLibSet.Remove);
@@ -1023,7 +1028,7 @@ sealed class PlanBuilder
         var plan = new Plan(game.Id, index.ContentHash, string.Join(" + ", new[] { plat, n11 > 0 ? $"D3D11 {plat11 ?? "DXBC"}" : "" }.Where(p => p != "")), caps.Profile,
             new PlanStats(recs.Count + stateObjects.Count, items.Count + synthesized.Count + rtItems.Count + hitGroupItems.Count, synthesized.Count, usedRs.Count, dx12 && (verified || embeddedRs > 0),
                 unitsBy[(int)Provenance.Exact], unitsBy[(int)Provenance.Inferred], unitsBy[(int)Provenance.Guessed], layoutCoverage, n11, packNew,
-                stats.GetValueOrDefault("rs_uncovered"), rtLibs, inlineOnly || engine.NoRtPipelines ? 0 : rtLibs - rtCovered,
+                stats.GetValueOrDefault("rs_uncovered"), rtLibs, inlineOnly || engine.NoRtPipelines || RootSig.NoRtCache(rule) ? 0 : rtLibs - rtCovered,
                 StageSets: seen.Count + unpaired, LeftOut: new[] { "no_rs", "no_template", "no_gs_template", "rs_uncovered", "stream_output" }.Sum(stats.GetValueOrDefault),
                 MiddlewareSharedItems: packShared, RtStateObjects: replayable.Count, RtInline: rtInline),
             Path.Combine(outDir, "plan.bin"));

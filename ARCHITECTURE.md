@@ -429,6 +429,22 @@ Northlight gets its own global and local root signatures (`RtCollections.Northli
 each library's payload and attributes, and a guessed recursion depth of 1; Control creates whole ray tracing pipelines,
 not collections, so whether NVIDIA reuses these collections for them is unverified.
 
+**Where the driver never serves a warm's ray tracing** (`RootSig.NoRtCache`: Kuro's 4.26 fork, Wuthering Waves): nothing
+ray tracing is planned or replayed (`PlanBuilder.Build`, `Planner.Materialize` drops the recording's state objects).
+Measured on NVIDIA 617.42: 1,137 collections the game had created, compiled again by `scskiller_warm` under the game's exe
+name with its NVAPI slot, in four variants (plain; the driver profile's folder condition, `turbojpeg.dll` staged; NVAPI
+pipeline options with OMM; both), all compiled again in game at a 94 ms median, while the game's own entries from an
+earlier launch hit at 12 ms; the raster pipelines of the same warm hit. The driver profile's folder condition does change
+the collection key (a warm with and without `turbojpeg.dll` beside the exe fill different entries), so a warm's staged
+folder would need the profile's `fileInFolder` files for RT in general; it didn't suffice here.
+
+**Compact plans** (`GameRecord.CompactPlan`, the game's "Compact compile" switch, CLI `compile <game> --compact`; the
+default for Kuro's fork, `ScsKiller.CompactByDefault`): `StageSets` takes only exact maps (`ShaderMap.IsPipeline`) and the
+pooled global maps, so raster and compute pipelines come from the game's pipeline cache, its global shaders and the
+recording, not from every material map. Player-independent. Wuthering Waves: 72k stage units against the full plan's
+915k, covering 86-96% of the pipelines of four play sessions (the full plan 100%); the full plan's 32 GB cost 9.7 s per
+`D3D12CreateDevice` at the game's start (about 7 of them) and a 16 GB working set.
+
 Elden Ring compiles each material's closest hit and any hit pair (one per ray payload, its `_[RT].shaderbdle` bundle)
 into a collection, then links its pipelines from the loaded materials' collections plus `gxraytracing`'s libraries.
 The plan has one collection per pair (`'H'`, `FromSoft.SoulsRayTracing`) in the game's shape: shader config (12, 8),

@@ -147,6 +147,12 @@ public sealed partial class DetailPage : Page
 
     void SetCareful(bool on) => Set((vm, p) => vm.CarefulPending = p, on, id => App.Core.SetCarefulCompile(id, on));
 
+    void OnCompactToggled(object _, RoutedEventArgs __)
+    {
+        var on = CompactSwitch.IsOn;   // read here: the change runs off the UI thread
+        if (on != Vm.CompactOn) Set((vm, p) => vm.CompactPending = p, on, id => App.Core.SetCompactPlan(id, on));
+    }
+
     /// <summary>Never blank: an exception without a message (some WinRT ones) shows its type, and its inner one's.</summary>
     static string Describe(Exception e) => !string.IsNullOrWhiteSpace(e.Message) ? e.Message
         : e.GetType().Name + (e.InnerException is { } inner ? ": " + Describe(inner) : $" (0x{e.HResult:X8})");

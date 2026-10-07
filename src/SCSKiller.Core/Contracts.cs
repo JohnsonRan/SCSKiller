@@ -180,8 +180,13 @@ public interface IPlanner
     /// <param name="maximum">With a per-stage cache (<see cref="VendorCaps.PerStageCache"/>) a plan needs every stage unit
     /// once; maximum also emits every stage set whose units are already covered (every pairing pre-linked), with the same
     /// per-unit state. Without one, plans are whole pipelines either way.</param>
+    /// <param name="compact">Raster and compute pipelines only from the game's own lists: what it ships as pipelines (its
+    /// pipeline cache), its global shaders (every map draws with them) and the recording; not the material shaders of every
+    /// map enumerated from its libraries. Player-independent, and a fraction of the full plan (Wuthering Waves: 72k of
+    /// 915k stage units covered 86-96% of four play sessions' pipelines; the full plan's 32 GB cost 9.7 s per device at
+    /// the game's start).</param>
     Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir,
-        IProgress<string>? log, CancellationToken ct, bool maximum = false);
+        IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false);
     /// <summary>Writes a warm-ready work folder: scskiller.db (the recording, or empty) + scskiller_gen.db
     /// (shader bytes pulled from the game through <paramref name="reader"/>, templates, root signatures, plan items).</summary>
     void Materialize(Plan plan, Game game, EngineInfo engine, IEngineReader reader, Recording? recording, string workDir, CancellationToken ct);
@@ -256,6 +261,10 @@ public sealed record GameState(
     long? LastWarmNeedsRecording = null,   // of LastWarmSkipped, those the community recording flags as built at run time or by a mod
     long? LastWarmCrashed = null,   // the last complete warm: items skipped because they crash the GPU driver
     CarefulCompile? Careful = null,        // AMD's careful compile (ScsKiller.CarefulThreads); null = not this vendor's
+    bool? CompactPlan = null,              // the plan is compact (IScsKiller.SetCompactPlan); null = not offered (no libraries to leave out: a carved or D3D11 game)
+    bool CompactDefault = false,           // compact is this engine's default (ScsKiller.CompactByDefault)
+    bool CompactUnplanned = false,         // the switch changed since the plan was built: Plan's numbers are the other setting's until the next compile
+    bool RtNotCached = false,              // the driver's ray tracing cache never serves this game a warm's work (RootSig.NoRtCache): none planned or replayed
     long RecordingBytes = 0,        // the recorder's data files in the game folder plus SCSKiller's copy of its recording
     bool RecordingPaused = false,   // the recorder is in and its recording reached Settings.RecordingLimitMB: no new records
     long RecordedSinceWarm = 0,     // pipelines its recordings and packs have that the last complete warm didn't compile, apart from NewPipelines (derived)
@@ -405,6 +414,11 @@ public interface IScsKiller
     /// <summary>AMD: the game's compiles run careful (<see cref="CarefulCompile"/>) or fast; InvalidOperationException on
     /// another vendor.</summary>
     void SetCarefulCompile(string gameId, bool on);
+
+    /// <summary>The game's plans are compact (<see cref="IPlanner.Build"/> compact) or full; null = the engine's default.
+    /// Rebuilds the plan at the next compile or plan check; a warm of a larger plan stays current. InvalidOperationException
+    /// while a compile of it runs.</summary>
+    void SetCompactPlan(string gameId, bool? on);
 
     /// <summary>Sets the override On; throws InvalidOperationException when it can't install now (a running game gets it on exit).</summary>
     void InstallRecorder(string gameId);

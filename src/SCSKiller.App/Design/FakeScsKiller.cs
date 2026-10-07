@@ -281,6 +281,16 @@ public sealed class FakeScsKiller : IScsKiller
         }
         GameChanged?.Invoke(g);
     }
+    public void SetCompactPlan(string gameId, bool? on)
+    {
+        GameState g;
+        lock (gate)
+        {
+            int i = games.FindIndex(x => x.Game.Id == gameId);
+            games[i] = g = games[i] with { CompactPlan = on ?? games[i].CompactDefault };
+        }
+        GameChanged?.Invoke(g);
+    }
     public void RefreshGame(string gameId) => GameChanged?.Invoke(Games.FirstOrDefault(g => g.Game.Id == gameId) ?? throw new ArgumentException($"unknown game '{gameId}'"));
     public void RefreshCacheSizes() { }   // sample data: nothing changes on disk
     public ManualAdd PreviewManualGame(string exePath) => throw new ArgumentException("The sample library can't add games.");

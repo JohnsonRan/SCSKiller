@@ -114,9 +114,9 @@ public sealed class Planner(string? packDir = null, string? sharedPackDir = null
     }
 
     public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir,
-        IProgress<string>? log, CancellationToken ct, bool maximum = false)
+        IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false)
     {
-        var builder = new PlanBuilder(game, engine, index, recording, caps, outDir, log, ct, maximum, Packs, SharedPacks);
+        var builder = new PlanBuilder(game, engine, index, recording, caps, outDir, log, ct, maximum, Packs, SharedPacks, compact);
         var plan = builder.Build();
         if (builder.PackFingerprint is { } f) seeded.AddOrUpdate(plan, f);
         return plan;
@@ -214,9 +214,10 @@ public sealed class Planner(string? packDir = null, string? sharedPackDir = null
         // come first, so one pass drops the dependents of a dropped one too
         var keptKeys = new HashSet<string>();
         var keptMain = new List<Rec>();
+        var noRt = RootSig.RuleFor(engine) is { } rule && RootSig.NoRtCache(rule);   // the game never reads what a warm's state objects cached
         foreach (var r in main)
             if (r.Tag is 'B' or 'W') keptMain.Add(r);
-            else if (r.Tag == 'L') continue;
+            else if (r.Tag == 'L' || noRt && IsStateObject(r.Tag)) continue;
             else if (Keep(r) && (!IsStateObject(r.Tag) || ParseStateObject(r).Depends.All(keptKeys.Contains))) { keptMain.Add(r); keptKeys.Add(r.Key); }
             else if (localOnly.Contains(r.Key)) needsRecording++;
         if (keptMain.Count < main.Count)
@@ -225,7 +226,9 @@ public sealed class Planner(string? packDir = null, string? sharedPackDir = null
             foreach (var r in keptMain) Write(f, r.Tag, r.Payload);
         }
         var keptTemplates = templates.Where(Keep).ToList();
-        skipped += main.Count - main.Count(r => r.Tag == 'L') - keptMain.Count + templates.Count - keptTemplates.Count + items.Count - keptItems.Count;
+        var droppedRt = noRt ? main.Count(r => IsStateObject(r.Tag)) : 0;
+        if (droppedRt > 0) Log?.Report($"{droppedRt} recorded ray tracing state objects not replayed: the driver's ray tracing cache never serves this game a compile's work");
+        skipped += main.Count - main.Count(r => r.Tag == 'L') - droppedRt - keptMain.Count + templates.Count - keptTemplates.Count + items.Count - keptItems.Count;
         foreach (var r in keptTemplates) Write(gen, r.Tag, r.Payload);
         foreach (var r in keptItems) Write(gen, r.Tag, r.Payload);
         var keptPsos = keptTemplates.Concat(keptItems).Select(r => r.Key).ToHashSet();

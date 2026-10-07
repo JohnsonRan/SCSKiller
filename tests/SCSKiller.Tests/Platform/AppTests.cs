@@ -6878,6 +6878,76 @@ public partial class AppTests : IDisposable
     }
 
     [Fact]
+    public async Task Compact_plans_are_offered_per_game_and_rebuild_the_plan()
+    {
+        async Task Compile(ScsKiller k)
+        {
+            k.Enqueue(_game.Id);
+            k.StartQueue();
+            await k.WhenQueueIdle().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        var planner = new FlagPlanner(new PlanStats(0, 10000, 5, 7, true, StageSets: 3));
+        var k = Killer(new FakeReader(Unreal), planner);
+        await k.ScanAsync(default);
+        await Compile(k);
+        var s = k.Games.Single();
+        Assert.Equal((false, false, false), (planner.Compact, s.CompactPlan, s.CompactDefault));   // stock Unreal: full by default
+
+        k.SetCompactPlan(_game.Id, true);
+        var rec = k.Store.LoadGame(_game.Id);
+        Assert.True(rec.CompactPlan == true && !rec.PlanCompact);   // the plan is stale until the next build
+        Assert.True(k.Games.Single() is { CompactPlan: true, CompactUnplanned: true });
+        await Compile(k);
+        Assert.True(planner.Compact);
+        Assert.True(k.Store.LoadGame(_game.Id).PlanCompact);
+        Assert.False(k.Games.Single().CompactUnplanned);
+        Assert.Equal(GameStatus.Warmed, k.Games.Single().Status);
+
+        k.SetCompactPlan(_game.Id, null);   // back to the engine's default (full)
+        await Compile(k);
+        Assert.False(planner.Compact);
+
+        var none = new FlagPlanner(new PlanStats(0, 10000, 5, 7, true));   // no stage sets counted (an older plan): not offered
+        var k2 = Killer(new FakeReader(Unreal), none, game: _game with { Id = "steam:old" });
+        await k2.ScanAsync(default);
+        k2.Enqueue("steam:old");
+        k2.StartQueue();
+        await k2.WhenQueueIdle().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(k2.Games.Single().CompactPlan);
+    }
+
+    /// <summary>Compact is the default for Kuro's fork (ScsKiller.CompactByDefault), and its plan is built compact without a choice.</summary>
+    [Fact]
+    public async Task Kuro_fork_plans_compact_by_default()
+    {
+        var planner = new FlagPlanner(new PlanStats(0, 10000, 5, 7, true, StageSets: 3));
+        var k = Killer(new FakeReader(Unreal with { Version = "4.26", Fork = "GAME_WutheringWaves" }), planner);
+        await k.ScanAsync(default);
+        k.Enqueue(_game.Id);
+        k.StartQueue();
+        await k.WhenQueueIdle().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(planner.Compact);
+        Assert.True(k.Games.Single() is { CompactPlan: true, CompactDefault: true, RtNotCached: true });
+        k.SetCompactPlan(_game.Id, false);
+        Assert.True(k.Games.Single() is { CompactPlan: false, CompactUnplanned: true });
+    }
+
+    /// <summary>A <see cref="FakePlanner"/> that keeps the last build's compact flag.</summary>
+    sealed class FlagPlanner(PlanStats stats) : IPlanner
+    {
+        readonly FakePlanner inner = new(stats: stats);
+        public bool? Compact;
+        public PlanCheck Check(Game game, EngineInfo engine, Recording? recording, VendorCaps caps) => inner.Check(game, engine, recording, caps);
+        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false)
+        {
+            Compact = compact;
+            return inner.Build(game, engine, index, recording, caps, outDir, log, ct, maximum, compact);
+        }
+        public void Materialize(Plan plan, Game game, EngineInfo engine, IEngineReader reader, Recording? recording, string workDir, CancellationToken ct) =>
+            inner.Materialize(plan, game, engine, reader, recording, workDir, ct);
+    }
+
+    [Fact]
     public async Task Middleware_next_to_the_exe_is_listed_by_its_player_name()
     {
         File.WriteAllBytes(Path.Combine(_exeDir, "libxess.dll"), []);
@@ -8936,8 +9006,8 @@ public partial class AppTests : IDisposable
             _ when recorded && recording == null => new(Readiness.NeedsRecording, "needs a recording"),
             _ => _inner.Check(game, engine, recording, caps),
         };
-        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false) =>
-            _inner.Build(game, engine, index, recording, caps, outDir, log, ct, maximum);
+        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false) =>
+            _inner.Build(game, engine, index, recording, caps, outDir, log, ct, maximum, compact);
         public void Materialize(Plan plan, Game game, EngineInfo engine, IEngineReader reader, Recording? recording, string workDir, CancellationToken ct) =>
             _inner.Materialize(plan, game, engine, reader, recording, workDir, ct);
     }
@@ -11117,10 +11187,10 @@ public partial class AppTests : IDisposable
         public List<string>? BuiltWith;
         public PlanCheck Check(Game game, EngineInfo engine, Recording? recording, VendorCaps caps) =>
             recording == null ? new(Readiness.NeedsRecording, "needs one short recording") : new(Readiness.Ready, "planned from a recording");
-        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false)
+        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false)
         {
             BuiltWith = recording == null ? null : PsoDb.Read(recording.DbPath).Select(r => r.Key).ToList();
-            return Inner.Build(game, engine, index, recording, caps, outDir, log, ct, maximum);
+            return Inner.Build(game, engine, index, recording, caps, outDir, log, ct, maximum, compact);
         }
         public void Materialize(Plan plan, Game game, EngineInfo engine, IEngineReader reader, Recording? recording, string workDir, CancellationToken ct) =>
             Inner.Materialize(plan, game, engine, reader, recording, workDir, ct);
@@ -11198,7 +11268,7 @@ public partial class AppTests : IDisposable
         Func<Recording?, PlanStats>? statsFor = null) : IPlanner
     {
         public PlanCheck Check(Game game, EngineInfo engine, Recording? recording, VendorCaps caps) => new(Readiness.Ready, "synthesized templates");
-        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false)
+        public Plan Build(Game game, EngineInfo engine, ShaderIndex index, Recording? recording, VendorCaps caps, string outDir, IProgress<string>? log, CancellationToken ct, bool maximum = false, bool compact = false)
         {
             var file = Path.Combine(outDir, "plan.bin");
             Directory.CreateDirectory(outDir);

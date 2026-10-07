@@ -11,11 +11,14 @@ const string Usage = """
     usage: scskiller <command>
       scan [--rescan]                             discover games and show their status (--rescan: redo engine detection)
       status [game]                               all games, or one in detail
-      compile <game|--all-ready> [--threads N] [--idle | --when-idle] [--careful | --fast]
+      compile <game|--all-ready> [--threads N] [--idle | --when-idle] [--careful | --fast] [--compact | --full | --default-scope]
                                                   --idle: background priority; --when-idle: also only while nobody uses the PC;
                                                   --careful (AMD): this and later compiles of the game compile its recorded
                                                   pipelines in passes on few threads, so the driver keeps more of them (slower);
-                                                  --fast: back to one pass
+                                                  --fast: back to one pass;
+                                                  --compact: this and later compiles of the game take only the pipelines it lists
+                                                  itself (its pipeline cache, its global shaders) and the recorded ones; --full: every
+                                                  material of every map too; --default-scope: the engine's default
       queue [command]                             debug shell for the compile queue: the command, then one per line on stdin:
                                                   list | add <game> | move <game> <index> | remove <game> | start | stop | wait | quit
       rewarm-stale [--if-driver-changed]          what the scheduled task runs; follows the driver-update setting
@@ -184,6 +187,7 @@ async Task<int> Status(string? query)
           middleware {(g.Middleware is { Count: > 0 } mw ? MiddlewareLine(mw, true) : "-")}
           estimate   {(g.EstimatedCacheBytes is { } est ? Format.Bytes(est) : "-")} of cache, {Hms(g.EstimatedWarmTime)}
           careful    {CarefulLine(g.Careful)}
+          scope      {(g.CompactPlan is not { } cp ? "-" : (cp ? "compact: the game's own lists and the recording" : "full: every material of every map") + (rec.CompactPlan == null ? " (this engine's default)" : ""))}{(g.RtNotCached ? "; ray tracing not compiled: the driver's ray tracing cache never serves this game a compile's work" : "")}
           warmed     {(g.WarmedAt is { } w ? $"{w:yyyy-MM-dd HH:mm} for driver {g.WarmedDriverVersion} in {Hms(g.LastWarmTime)}" + (ScsKiller.WarmCounts(g.LastWarmFailed ?? 0, g.LastWarmSkipped ?? 0, g.LastWarmCrashed ?? 0) is { } counts ? $"; {counts}" : "") : "never")}
           cache      {(g.CacheOnDisk is { } c ? $"{Format.Bytes(c)} on disk (driver-cache files its warms or the game had open)" : "-")}
           keys       {(rec.CacheKeys.Count > 0 ? string.Join(", ", rec.CacheKeys.Order()) : "-")}{(k.WarmAgs(g.Game.Id) is { } ags ? $" (compiles register its AGS app name {ags.App}, key {k.AgsKey(g.Game.Id)}: the exe name's case doesn't matter)" : AmdAppCache.IsNameHashed(rec.CacheKeys, ScsKiller.WarmExeName(g.Game, rec)) == false ? " (an app profile's key, not the exe name's hash: the name's case doesn't matter)" : "")}
@@ -307,8 +311,8 @@ async Task<int> CacheClear()
 
 async Task<int> Compile()
 {
-    if (args.Length < 2) return Fail("compile <game|--all-ready> [--threads N] [--idle | --when-idle] [--careful | --fast]");
-    Only("--all-ready", "--threads", "--idle", "--when-idle", "--careful", "--fast");
+    if (args.Length < 2) return Fail("compile <game|--all-ready> [--threads N] [--idle | --when-idle] [--careful | --fast] [--compact | --full | --default-scope]");
+    Only("--all-ready", "--threads", "--idle", "--when-idle", "--careful", "--fast", "--compact", "--full", "--default-scope");
     int? threads = Opt("--threads") is { } t ? int.TryParse(t, out var n) && n > 0 ? n : throw new ArgumentException("--threads takes a number of threads") : null;
     var k = await Open();
     if (threads != null) k.ThreadsOverride = threads;
@@ -323,6 +327,12 @@ async Task<int> Compile()
         {
             k.SetCarefulCompile(g.Game.Id, args.Contains("--careful"));
             Console.WriteLine($"{g.Game.Name}: {CarefulLine(k.Games.Single(s => s.Game.Id == g.Game.Id).Careful)}");
+        }
+    if (args.Contains("--compact") || args.Contains("--full") || args.Contains("--default-scope"))
+        foreach (var g in targets)
+        {
+            k.SetCompactPlan(g.Game.Id, args.Contains("--compact") ? true : args.Contains("--full") ? false : null);
+            Console.WriteLine($"{g.Game.Name}: plans {(k.Games.Single(s => s.Game.Id == g.Game.Id).CompactPlan == true ? "compact" : "full")}");
         }
     return await RunQueue(k, targets, whenIdle);
 }

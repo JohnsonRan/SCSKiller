@@ -301,6 +301,19 @@
                                           IsOn="{x:Bind Vm.CarefulOn, Mode=OneWay}" IsEnabled="{x:Bind Vm.CanToggleCareful, Mode=OneWay}" Toggled="OnCarefulToggled"
                                           AutomationProperties.Name="Careful compile" AutomationProperties.HelpText="{x:Bind Vm.CarefulNote, Mode=OneWay}" />
                         </Grid>
+                        <Grid ColumnSpacing="12" Visibility="{x:Bind Vm.HasCompact, Mode=OneWay}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Compact compile" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                <TextBlock Text="{x:Bind Vm.CompactNote, Mode=OneWay}" Style="{StaticResource Secondary}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="CompactSwitch" Grid.Column="1" MinWidth="0" VerticalAlignment="Top" OnContent="" OffContent=""
+                                          IsOn="{x:Bind Vm.CompactOn, Mode=OneWay}" IsEnabled="{x:Bind Vm.CanToggleCompact, Mode=OneWay}" Toggled="OnCompactToggled"
+                                          AutomationProperties.Name="Compact compile" AutomationProperties.HelpText="{x:Bind Vm.CompactNote, Mode=OneWay}" />
+                        </Grid>
                     </StackPanel>
                 </Border>
 

@@ -9,13 +9,22 @@ All notable changes to the SCSKiller app and command line. The format follows
 
 - On AMD, Unreal games that ship a pipeline cache (`*.stable.upipelinecache`) compile their vertex shaders for the input
   layouts in it as well as the recording's; those layouts come with the game and follow its patches.
+- "Compact compile" in a game's compile card (`compile <game> --compact`, `--full`, `--default-scope` on the command line):
+  only the pipelines the game lists itself (its pipeline cache and its global shaders) and the recorded ones, not every
+  material of every map. The same for every player, and a fraction of the driver cache, so the game starts faster; a map's
+  own materials compile the first time you enter it. On by default for Wuthering Waves, whose full compile is 32 GB: on
+  NVIDIA that cache made every device the game creates at its start take 9.7 s instead of 0.3 s. Measured over four play
+  sessions there, the compact plan's 72k shader stages covered 86-96% of the pipelines drawn, against 915k for the full one.
 
 ### Fixed
 
 - Wuthering Waves stayed "needs the game's AES key" after a correct key was entered: its engine was taken for Unreal
   4.27, not the 4.26 fork it runs on, so none of its files could be opened. Its 5.6 GB shader library is now read too.
 - Wuthering Waves' compile matched none of the pipelines the game creates: its 4.26 fork's root signatures also deny the
-  mesh and amplification stages. On NVIDIA its ray tracing shaders now compile too, without a recording. Compile it again.
+  mesh and amplification stages. Compile it again.
+- Wuthering Waves' ray tracing shaders are no longer compiled or replayed: measured on NVIDIA, the game never uses a
+  ray tracing collection a compile made, not even one identical to its own, while it does reuse the ones it compiles
+  itself. They were 21 GB of cache for nothing. Its raster pipelines are served as usual.
 
 ## [1.2.3] - 2026-10-06
 

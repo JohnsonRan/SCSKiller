@@ -617,6 +617,16 @@ public sealed class DetailVm(string id) : Bindable
     public bool? CarefulPending { get; set; }
     public bool CarefulOn => CarefulPending ?? s.Careful?.On == true;
     public bool CanToggleCareful => CarefulPending == null && !Queued;
+
+    // compact plans: a switch in the compile card, off while the game is queued
+    public bool HasCompact => s.CompactPlan != null && CanCompile;
+    public bool? CompactPending { get; set; }
+    public bool CompactOn => CompactPending ?? s.CompactPlan == true;
+    public bool CanToggleCompact => CompactPending == null && !Queued;
+    public string CompactNote => "Compiles only the pipelines the game lists itself (its pipeline cache and its global shaders) and the ones recorded in play, not every material of every map. "
+        + "A fraction of the driver cache, so the game starts faster; a map's own materials compile the first time you enter it."
+        + (s.CompactDefault ? " On by default for this game: its full compile is tens of gigabytes." : "")
+        + (s.CompactUnplanned ? " Changed since the plan was made: the numbers above are the old plan's until Compile plans it again." : "");
     public string CarefulNote => (s.Careful is { Recorded: 0 } ? "Compiles the pipelines recorded in the game in passes on few threads, so the driver keeps more of them. This game has no recording yet, so there is nothing to compile carefully."
         : $"Compiles the pipelines recorded in the game in passes on {ScsKiller.AmdCarefulThreads} threads, so the driver keeps more of them; the rest at full speed."
           + (s.Careful?.Estimate is { } est ? $" About {Format.Duration(est)}" + (s.Careful.On || s.EstimatedWarmTime is not { } fast ? "." : $" instead of {Format.Duration(fast)}.") : ""))
@@ -705,7 +715,7 @@ public sealed class DetailVm(string id) : Bindable
         p.MiddlewareItems > 0 ? new(p.MiddlewareSharedItems == 0 ? "Its upscalers, learned from recordings"
             : p.MiddlewareSharedItems == p.MiddlewareItems ? "Its upscalers, from shared packs" : "Its upscalers, from recordings and shared packs", Fmt.N(p.MiddlewareItems)) : null,
         p.D3D11Shaders > 0 ? new("DirectX 11 shaders", Fmt.N(p.D3D11Shaders)) : null,
-        p.RtLibraries > 0 ? new("Ray-traced effects", s.Engine?.NoRayTracing == true ? "off in this game" : s.Engine?.NoRtPipelines == true ? "inline, from the game files" : p.RtUncovered == 0 ? "covered" : s.RtToPlan ? "being checked" : RtUnseen ? "not seen while recording" : RtInline ? "inline ones covered" : !Rt ? "mostly covered" : CanRecord ? "need a recording" : "not compiled") : null,
+        p.RtLibraries > 0 ? new("Ray-traced effects", s.Engine?.NoRayTracing == true ? "off in this game" : s.Engine?.NoRtPipelines == true ? "inline, from the game files" : s.RtNotCached ? "the game caches them itself" : p.RtUncovered == 0 ? "covered" : s.RtToPlan ? "being checked" : RtUnseen ? "not seen while recording" : RtInline ? "inline ones covered" : !Rt ? "mostly covered" : CanRecord ? "need a recording" : "not compiled") : null,
     }.OfType<DetailRow>().ToList();
     public bool HasSources => Sources.Count > 0;
     /// <summary>The community database's line under the recording row; null = nothing to say.</summary>

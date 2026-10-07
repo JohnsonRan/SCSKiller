@@ -764,6 +764,9 @@ public sealed partial class ScsKiller : IScsKiller
             pending.Planned,
             IsPlaying(g.Id)) with { LastWarmNeedsRecording = rec.LastWarmNeedsRecording, LastWarmCrashed = rec.LastWarmCrashed,
                 Careful = cap != null ? new CarefulCompile(rec.Careful, rec.FirstLaunch?.Compiled, careful, recorded) : null,
+                CompactPlan = rec.Plan is { Stats.StageSets: > 0 } ? Compact(rec, engine) : null, CompactDefault = CompactByDefault(engine),
+                CompactUnplanned = rec.Plan != null && rec.PlanCompact != Compact(rec, engine),
+                RtNotCached = engine != null && RootSig.RuleFor(engine) is { } rr && RootSig.NoRtCache(rr),
                 RecordedSinceWarm = pending.Recorded, CommunityDbPsos = entry?.Psos ?? 0, PsoPerSecond = rec.PsoPerSecond,
                 LastFrames = frames, ShaderMod = shaderMod?.Mod, ShaderModBlocks = reshade?.Blocks == true, ShaderModLayer = reshade?.Layered == true,
                 ShaderModAsD3D12 = reshade is { Layered: true, AsD3D12: true }, RtUnseen = rtUnseen, RtToPlan = rtToPlan, RecordedEnough = rec.RecordedLong, RootUnconfirmed = unconfirmed },
@@ -1558,6 +1561,24 @@ public sealed partial class ScsKiller : IScsKiller
         Store.SaveGame(gameId, rec);
         Refresh(s.Game);
         return true;
+    }
+
+    /// <summary>Compact plans are the default for an engine whose full plan is far larger than what any one player draws
+    /// (IPlanner.Build compact): Kuro's 4.26 fork (Wuthering Waves: 738k raster PSOs, 32 GB, 9.7 s per device at its start).</summary>
+    internal static bool CompactByDefault(EngineInfo? e) => e != null && RootSig.RuleFor(e) == RootSig.Rule.Kuro;
+
+    static bool Compact(GameRecord r, EngineInfo? e) => r.CompactPlan ?? CompactByDefault(e);
+
+    public void SetCompactPlan(string gameId, bool? on)
+    {
+        var s = Find(gameId);
+        lock (_lock)
+            if (_current == gameId) throw new InvalidOperationException($"a compile of {s.Game.Name} is in progress");
+        var rec = Store.LoadGame(gameId);
+        if (rec.CompactPlan == on) return;
+        rec.CompactPlan = on;   // the plan is stale (PlanIsStale) when the effective value changed: the next compile or plan check rebuilds it
+        Store.SaveGame(gameId, rec);
+        Refresh(s.Game);
     }
 
     public void SetCarefulCompile(string gameId, bool on)
@@ -3814,8 +3835,8 @@ public sealed partial class ScsKiller : IScsKiller
             {
                 Stage(QueueStage.Planning);
                 await Gate(id, ct);
-                rec.PlanPerStage = PerStagePlans;
-                rec.Plan = _planner.Build(game, engine, index, Prepared(), Vendor.Caps, Store.GameDir(id), Log, ct, Settings.MaximumPlans);
+                (rec.PlanPerStage, rec.PlanCompact) = (PerStagePlans, Compact(rec, engine));
+                rec.Plan = _planner.Build(game, engine, index, Prepared(), Vendor.Caps, Store.GameDir(id), Log, ct, Settings.MaximumPlans, rec.PlanCompact);
                 (rec.PlanBuiltAt, rec.PlanVersion, rec.ResumeAt) = (DateTimeOffset.Now, Planner.Version, 0);
                 rec.PlanMaps = maps;
                 rec.PlanMiddleware = packs is null ? null : packs.SeededFingerprint(rec.Plan) ?? packs.PackFingerprint(game, shared);   // what the build read: it may have promoted into one
@@ -4037,7 +4058,7 @@ public sealed partial class ScsKiller : IScsKiller
 
     bool PlanIsStale(string id, GameRecord r, EngineInfo? e) => r.Plan is not { } p || !File.Exists(p.FilePath) || p.IndexContentHash != r.IndexContentHash
                                       || p.VendorProfile != Vendor.Caps.Profile || r.RecordingImportedAt > r.PlanBuiltAt
-                                      || r.PlanVersion != Planner.Version || r.PlanPerStage != PerStagePlans || r.PlanCommunity != CommunityInUse(id)?.Object || RtPlanCheck(r, e);
+                                      || r.PlanVersion != Planner.Version || r.PlanPerStage != PerStagePlans || r.PlanCompact != Compact(r, e) || r.PlanCommunity != CommunityInUse(id)?.Object || RtPlanCheck(r, e);
 
     /// <summary>Plans have each stage unit once: the vendor caches per stage and Maximum mode is off. A pairing plan warmed
     /// earlier already holds every unit, so going per-stage rebuilds the plan but needs no re-warm (see StaleReason).</summary>

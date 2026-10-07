@@ -26,6 +26,8 @@ public sealed class GameRecord
     public PendingCount? Pending { get; set; }               // the last count of pipelines new since the warm (ScsKiller.PendingOf)
     public bool PlanPerStage { get; set; }                  // the plan has each stage unit once, not every pairing (per-stage cache, not Maximum)
     public bool WarmedPerStage { get; set; }                // PlanPerStage of the plan the last complete warm replayed
+    public bool? CompactPlan { get; set; }                  // the game's plans are compact (IPlanner.Build compact); null = the engine's default (ScsKiller.CompactByDefault)
+    public bool PlanCompact { get; set; }                   // the plan was built compact
     public string? PlanMiddleware { get; set; }             // MiddlewarePacks.Fingerprint when the plan was built (DLL versions + pack sizes)
     public string? PlanCommunity { get; set; }              // the community recording (object id) the plan was built with; null = none
     public string? PlanMaps { get; set; }                   // ScsKiller.MapsFingerprint of the index the plan was built from
